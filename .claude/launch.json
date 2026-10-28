@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "pubky-mcp", "runtimeExecutable": "node", "runtimeArgs": ["--env-file=.env", "src/server.ts"], "port": 4100 }
+  ]
+}
