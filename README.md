@@ -106,8 +106,12 @@ restart.
   rewrites responses on paths ending in `/mcp` or `/sse`, and MCP SSE streams:
   `transfer-encoding: chunked` with an unframed body, so Node clients fail
   with `Invalid character in chunk size`. Measured on loopback (127.0.0.1,
-  ::1 and the LAN address); reported by others for HTTPS too. Run the tests
-  inside Docker, or exclude the address in Avast.
+  ::1 and the LAN address); reported by others for HTTPS too, and confirmed
+  by Avast staff (fix announced, no version given). On such a machine: add
+  the service's address as an Avast exception, or turn HTTPS scanning off in
+  Web Shield, and run the tests inside Docker. The server stays standard on
+  purpose; a measured server-side workaround (always answer chunked: Avast
+  leaves chunked answers alone) is in commit 41e35c1, reverted in b8613dd.
 - **`@synonymdev/pubky` replaces `globalThis.fetch`** with `fetch-cookie`
   (one cookie jar per process) when it is loaded. A test that simulates
   several browsers in one process must keep the original `fetch`.
