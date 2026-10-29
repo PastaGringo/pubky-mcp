@@ -106,7 +106,10 @@ E2E_HOMESERVER=<key> E2E_INVITES=<code1>,<code2>,<code3> E2E_NEXUS=1 node test/e
 ```
 
 `test/probe-post.ts` checks that a stored session still publishes after a
-restart.
+restart. `test/probe-foreign.ts` checks `ALLOWED_HOMESERVERS`: a key signed up
+on another homeserver (`FOREIGN_HOMESERVER`, `FOREIGN_INVITE`) approves the
+sign-in and must be refused (a key hosted nowhere fails earlier and proves
+nothing).
 
 ## Known pitfalls
 
