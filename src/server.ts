@@ -29,41 +29,6 @@ app.disable('x-powered-by')
 app.set('trust proxy', true)
 app.use(hostHeaderValidation([new URL(PUBLIC_URL).hostname]))
 
-// Avast's Web Shield (MCP_DETECTION in ashServ.dll) rewrites MCP answers that
-// carry a Content-Length into "transfer-encoding: chunked" with an unframed
-// body, which Node clients reject ("Invalid character in chunk size").
-// Chunked answers pass (measured), so MCP answers are always chunked. Removing
-// the header is not enough: Node computes a Content-Length itself when the
-// whole body goes out in one end(); a Transfer-Encoding header forces chunks.
-// TODO: remove once Avast ships the fix its staff announced:
-// https://community.avast.com/t/invalid-http-chunked-framing-observed-during-mcp-oauth-discovery-with-avast-https-inspection/921781
-// (server-side workaround first described in cronumstudio/suite-core#191).
-function withoutContentLength(_req: Request, res: Response, next: () => void) {
-  const isLength = (name: unknown) => String(name).toLowerCase() === 'content-length'
-  const setHeader = res.setHeader.bind(res)
-  res.setHeader = ((name: string, value: number | string | readonly string[]) =>
-    isLength(name) ? res : setHeader(name, value)) as typeof res.setHeader
-  const writeHead = res.writeHead.bind(res) as (...args: unknown[]) => Response
-  res.writeHead = ((...args: unknown[]) => {
-    const i = typeof args[1] === 'string' ? 2 : 1
-    const headers = args[i]
-    if (Array.isArray(headers)) {
-      // Either [[name, value], …] or a flat [name, value, name, value, …].
-      args[i] = Array.isArray(headers[0])
-        ? headers.filter(([name]) => !isLength(name))
-        : headers.filter((_v, j) => j % 2 === 1 ? !isLength(headers[j - 1]) : !isLength(headers[j]))
-    } else if (headers && typeof headers === 'object') {
-      args[i] = Object.fromEntries(Object.entries(headers).filter(([name]) => !isLength(name)))
-    }
-    const status = Number(args[0])
-    if (status !== 204 && status !== 304 && !res.hasHeader('transfer-encoding')) {
-      setHeader('Transfer-Encoding', 'chunked')
-    }
-    return writeHead(...args)
-  }) as typeof res.writeHead
-  next()
-}
-
 const send = (res: Response, status: number, type: string, body: string) =>
   res.status(status).set({ 'content-type': type, 'cache-control': 'no-store' }).send(body)
 const sendJson = (res: Response, body: unknown) => send(res, 200, 'application/json', JSON.stringify(body))
@@ -79,7 +44,7 @@ const resourceMetadata = {
   resource_name: 'Pubky (pubky.app posts)',
 }
 for (const path of ['/.well-known/oauth-protected-resource', `/.well-known/oauth-protected-resource${MCP_PATH}`]) {
-  app.get(path, withoutContentLength, (_req, res) => sendJson(res, resourceMetadata))
+  app.get(path, (_req, res) => sendJson(res, resourceMetadata))
 }
 
 // --- Access tokens: JWTs signed by our own authorization server ---------------
@@ -144,7 +109,7 @@ async function handleMcp(req: Request, res: Response) {
   await transport.handleRequest(req, res, req.body)
 }
 
-app.all(MCP_PATH, withoutContentLength, bearer, express.json({ limit: '1mb' }), (req, res, next) => {
+app.all(MCP_PATH, bearer, express.json({ limit: '1mb' }), (req, res, next) => {
   handleMcp(req, res).catch(next)
 })
 
