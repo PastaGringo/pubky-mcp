@@ -2,7 +2,7 @@
 // stored homeserver sessions, and writing pubky.app posts.
 
 import { Pubky, AuthFlowKind, PublicKey, type Path, type Session } from '@synonymdev/pubky'
-import { PubkySpecsBuilder, PubkyAppPostKind } from 'pubky-app-specs'
+import { PubkySpecsBuilder, PubkyAppPostEmbed, PubkyAppPostKind } from 'pubky-app-specs'
 import { ALLOWED_HOMESERVERS, CAPABILITIES, NEXUS_URL, PUBKY_RELAY, PUBKY_TESTNET } from './config.ts'
 import { accountSecret, saveAccount } from './db.ts'
 
@@ -89,7 +89,22 @@ async function sessionFor(operator: string, account: string): Promise<Session> {
   }
 }
 
-const POST_URI = /^pubky:\/\/([a-z0-9]{52})\/pub\/pubky\.app\/posts\/([0-9A-Z]{13})$/
+// Nexus reports a post's kind as a lowercase name ("short", "image"…).
+const KINDS: Record<string, PubkyAppPostKind> = {
+  short: PubkyAppPostKind.Short,
+  long: PubkyAppPostKind.Long,
+  image: PubkyAppPostKind.Image,
+  video: PubkyAppPostKind.Video,
+  link: PubkyAppPostKind.Link,
+  file: PubkyAppPostKind.File,
+}
+function postKind(kind: string): PubkyAppPostKind {
+  const value = KINDS[kind]
+  if (value === undefined) throw new AccountError(`cannot repost a post of kind ${kind}`)
+  return value
+}
+
+const POST_URI =/^pubky:\/\/([a-z0-9]{52})\/pub\/pubky\.app\/posts\/([0-9A-Z]{13})$/
 
 export function parsePostUri(uri: string): { author: string; id: string } {
   const m = POST_URI.exec(uri.trim())
@@ -97,14 +112,39 @@ export function parsePostUri(uri: string): { author: string; id: string } {
   return { author: m[1], id: m[2] }
 }
 
-// Writes a short pubky.app post (a reply when `parent` is set) and returns its URI.
-export async function createPost(operator: string, account: string, content: string, parent?: string): Promise<string> {
-  if (parent) parsePostUri(parent)
+// Reads a post from its author's homeserver (anonymous, no Nexus lag).
+// Undefined when it does not exist.
+export async function readPost(uri: string): Promise<{ kind: string; content: string } | undefined> {
+  parsePostUri(uri)
+  try {
+    const post = JSON.parse(await pubky.publicStorage.getText(uri.trim() as `pubky://${string}/pub/${string}`)) as {
+      kind?: unknown
+      content?: unknown
+    }
+    return { kind: String(post.kind ?? ''), content: String(post.content ?? '') }
+  } catch (e) {
+    if (e instanceof Error && /404/.test(e.message)) return undefined
+    throw e
+  }
+}
+
+// Writes a short pubky.app post and returns its URI: a reply when `parent` is
+// set, a repost of `embed` (a quote when `content` is not empty) when it is set.
+export async function createPost(
+  operator: string,
+  account: string,
+  content: string,
+  options: { parent?: string; embed?: { uri: string; kind: string } } = {},
+): Promise<string> {
+  if (options.parent) parsePostUri(options.parent)
+  if (options.embed) parsePostUri(options.embed.uri)
   const session = await sessionFor(operator, account)
   try {
-    const { meta, post } = new PubkySpecsBuilder(account).createPost(content, PubkyAppPostKind.Short, parent ?? null)
-    // toJson() writes absent fields as null ("parent": null, "embed": null…);
-    // posts written by pubky.app omit them. Write what pubky.app writes.
+    const embed = options.embed ? new PubkyAppPostEmbed(options.embed.uri, postKind(options.embed.kind)) : null
+    const { meta, post } = new PubkySpecsBuilder(account).createPost(content, PubkyAppPostKind.Short, options.parent ?? null, embed)
+    // toJson() writes absent fields as null ("parent": null, "embed": null…).
+    // Both forms exist on pubky.app (measured: posts with and without the null
+    // fields, all indexed by Nexus); the shorter one is written.
     const body = Object.fromEntries(
       Object.entries(post.toJson() as Record<string, unknown>).filter(([, v]) => v !== null && v !== undefined),
     )

@@ -203,7 +203,7 @@ async function main() {
   }
   const client = await connect(tokens.access_token)
   const tools = (await client.listTools()).tools.map((t) => t.name).sort()
-  check(tools.join() === 'create_post,delete_post,link_account,list_accounts,read_feed,read_post,read_user_posts,unlink_account', `8 tools: ${tools.join(', ')}`)
+  check(tools.join() === 'create_post,delete_post,link_account,list_accounts,read_feed,read_post,read_user_posts,repost,unlink_account', `9 tools: ${tools.join(', ')}`)
   let accounts = (await call(client, 'list_accounts')).json as { pubky: string; signed_in: boolean }[]
   check(accounts.length === 1 && accounts[0].pubky === A.key && accounts[0].signed_in, 'list_accounts: identity A, signed in')
 
@@ -271,6 +271,15 @@ async function main() {
   const reply = (await call(client, 'create_post', { accounts: [A.key], content: 'reply from A', reply_to: posted[1].uri })).json as { uri: string }[]
   const replyStored = JSON.parse(await pubky.publicStorage.getText(reply[0].uri as `pubky://${string}/pub/${string}`)) as Record<string, unknown>
   check(replyStored.parent === posted[1].uri, 'reply stores its parent URI')
+  // Repost, as pubky.app writes one: {content, embed: {kind, uri}, kind}.
+  const plain = (await call(client, 'repost', { accounts: [A.key], uri: posted[1].uri })).json as { uri: string }[]
+  const plainStored = JSON.parse(await pubky.publicStorage.getText(plain[0].uri as `pubky://${string}/pub/${string}`)) as Record<string, unknown>
+  check(plainStored.content === '' && plainStored.kind === 'short' && JSON.stringify(plainStored.embed) === JSON.stringify({ kind: 'short', uri: posted[1].uri }), `plain repost: ${JSON.stringify(plainStored)}`)
+  const quote = (await call(client, 'repost', { accounts: [B.key], uri: posted[0].uri, comment: 'worth reading' })).json as { uri: string }[]
+  const quoteStored = JSON.parse(await pubky.publicStorage.getText(quote[0].uri as `pubky://${string}/pub/${string}`)) as Record<string, unknown>
+  check(quoteStored.content === 'worth reading' && (quoteStored.embed as { uri: string }).uri === posted[0].uri, 'quote repost keeps the comment and embeds the original')
+  const missing = await call(client, 'repost', { accounts: [A.key], uri: `pubky://${A.key}/pub/pubky.app/posts/0035ZZZZZZZZZ` })
+  check(missing.isError, 'reposting a post that does not exist: refused')
   const stray = await call(client, 'create_post', { accounts: [Keypair.random().publicKey.z32()], content: 'x' })
   check(stray.isError && stray.raw.includes('not linked'), 'posting as an unlinked account: refused')
 
@@ -290,7 +299,7 @@ async function main() {
   }
 
   console.log('clean up')
-  for (const [account, uri] of [...posted.map((p) => [p.account, p.uri!]), [A.key, reply[0].uri]]) {
+  for (const [account, uri] of [...posted.map((p) => [p.account, p.uri!]), [A.key, reply[0].uri], [A.key, plain[0].uri], [B.key, quote[0].uri]]) {
     const del = await call(client, 'delete_post', { account, uri })
     check(!del.isError, `delete_post ${uri.slice(-13)}`)
     const gone = await pubky.publicStorage.exists(uri as `pubky://${string}/pub/${string}`)

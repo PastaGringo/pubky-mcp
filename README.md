@@ -25,9 +25,14 @@ from **several Pubky accounts**, signed in with **Pubky Ring**.
 | `read_user_posts` | Latest posts of one user (Nexus) |
 | `read_post` | One post and its replies (Nexus) |
 | `create_post` | Publish a short post (≤ 2000 characters) or a reply, from one or several accounts |
+| `repost` | Repost a post from one or several accounts, plain or with a comment (quote) |
 | `delete_post` | Delete a post written by a linked account |
 
-`create_post` takes the accounts explicitly; there is no default account.
+`create_post` and `repost` take the accounts explicitly; there is no default
+account. A repost is written as pubky.app writes one: `{"content": "",
+"embed": {"kind": "short", "uri": "<original>"}, "kind": "short"}`, with the
+comment in `content` for a quote; the original is read from its author's
+homeserver, so a post just published can be reposted at once.
 
 ## How it works
 
@@ -64,7 +69,9 @@ cp .env.example .env    # set SESSION_ENCRYPTION_KEY and PUBLIC_URL
 node --env-file=.env src/server.ts
 ```
 
-Docker: `docker build -t pubky-mcp .`, then run with the same variables and a
+Docker: the image `ghcr.io/pastagringo/pubky-mcp` is published on every push
+to `main` (tags `latest` and the commit SHA), or `docker build -t pubky-mcp .`;
+run it with the same variables and a
 volume on `/data`. Put it behind a TLS reverse proxy; `PUBLIC_URL` is the
 public HTTPS address.
 
@@ -80,7 +87,8 @@ claude mcp add --transport http pubky https://mcp.example.com/mcp
 (discovery, registration, PKCE, refresh), the browser (cookies, redirects) and
 Pubky Ring (throwaway identities that sign up and approve). It checks the
 phishing protection, URL elicitation and its completion notice, the stored
-format of a post (exactly `{content, kind}`), replies, refusals, deletion.
+format of a post (exactly `{content, kind}`), replies, reposts and quotes,
+refusals, deletion (48 checks).
 
 Against a local Pubky testnet (`synonymsoft/homeserver-testnet`, which needs a
 PostgreSQL on its `localhost:5432` with a `root` role):
@@ -111,11 +119,12 @@ restart.
   the service's address as an Avast exception, or turn HTTPS scanning off in
   Web Shield, and run the tests inside Docker. The server stays standard on
   purpose; a measured server-side workaround (always answer chunked: Avast
-  leaves chunked answers alone) is in commit 41e35c1, reverted in b8613dd.
+  leaves chunked answers alone) is in commit fbdbd0c, reverted in 5a8a9ff.
 - **`@synonymdev/pubky` replaces `globalThis.fetch`** with `fetch-cookie`
   (one cookie jar per process) when it is loaded. A test that simulates
   several browsers in one process must keep the original `fetch`.
-- **`pubky-app-specs` `toJson()` writes absent fields as `null`**; pubky.app
-  omits them. The service strips them before writing.
+- **`pubky-app-specs` `toJson()` writes absent fields as `null`.** Both forms
+  exist on pubky.app (posts with and without the `null` fields, all indexed by
+  Nexus); the service writes the shorter one.
 - The capability `/pub/pubky.app/posts/:rw` is enough to post and delete;
   pubky.app paths are planned to move (`/pub/pubky.app/` → `/pub/social/v1/`).

@@ -5,3 +5,4 @@ data/
 !.env.example
 .claude/current-model
 .pnpm-store/
+TESTING.md

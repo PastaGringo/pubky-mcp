@@ -7,7 +7,7 @@ import { PUBLIC_URL } from './config.ts'
 import { deleteAccount, listAccounts } from './db.ts'
 import { createLinkRequest } from './links.ts'
 import * as nexus from './nexus.ts'
-import { AccountError, createPost, deletePost, parsePostUri, signOut } from './pubky.ts'
+import { AccountError, createPost, deletePost, parsePostUri, readPost, signOut } from './pubky.ts'
 
 const pubkyKey = z.string().regex(/^[a-z0-9]{52}$/, 'a Pubky public key: 52 characters of z-base-32')
 const postUri = z.string().describe('pubky.app post URI: pubky://<author>/pub/pubky.app/posts/<id>')
@@ -152,7 +152,42 @@ export function createMcpServer(operator: string): McpServer {
           continue
         }
         try {
-          results.push({ account, uri: await createPost(operator, account, content, reply_to) })
+          results.push({ account, uri: await createPost(operator, account, content, { parent: reply_to }) })
+        } catch (e) {
+          results.push({ account, error: e instanceof Error ? e.message : String(e) })
+        }
+      }
+      const failed = results.filter((r) => 'error' in r).length
+      return { ...text(results), isError: failed === results.length }
+    },
+  )
+
+  server.registerTool(
+    'repost',
+    {
+      title: 'Repost a post',
+      description:
+        'Reposts a pubky.app post from each listed account. With a comment it is a quote post (the comment above the original), ' +
+        'without one a plain repost.',
+      inputSchema: {
+        accounts: z.array(pubkyKey).min(1).describe('accounts to repost as; see list_accounts'),
+        uri: postUri,
+        comment: z.string().max(2000).optional().describe('text shown above the original; omit for a plain repost'),
+      },
+    },
+    async ({ accounts, uri, comment }) => {
+      const original = await readPost(uri)
+      if (!original) return failure('This post does not exist on its author’s homeserver.')
+      const known = linked()
+      const results = []
+      for (const account of new Set(accounts)) {
+        if (!known.has(account)) {
+          results.push({ account, error: 'not linked to this connection' })
+          continue
+        }
+        try {
+          const embed = { uri: uri.trim(), kind: original.kind }
+          results.push({ account, uri: await createPost(operator, account, comment ?? '', { embed }) })
         } catch (e) {
           results.push({ account, error: e instanceof Error ? e.message : String(e) })
         }
